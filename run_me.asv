@@ -1,0 +1,408 @@
+orgim=imread('1.tif');
+im=orgim;
+%imageSegmenter(im);
+load('BW1')
+im=255*((double(im)./255).^2.2);
+
+
+%% initial param 
+maxextention=50;
+lambda=1.2; %log scale  1.2
+sigma=1;%cornsweet 1
+maxCPspace=3;
+percent=0.13; %the percent of the maximum cornsweent effect depends on the max luminance around the CP 0.13
+colour=0; % 1 if it is colured image gray scale 0
+
+%% initail calculations
+LABimorg=rgb2lab(im);
+LABim=LABimorg;
+l=LABim(:,:,1);
+L=log10(l+1);
+T=TexturenessBae(l/max(l(:))); % the values is between 0 and 1 
+T=1+(T/5);
+targetC = [0 105 180]; % RGB
+YxyTC=rgb2lab(targetC);
+seg=bwlabel(BW1);
+
+%% find edges and Control Points 
+edges=edge(BW1,'canny',0.3);
+nedges=bwlabel(edges);
+n=max(nedges(:));
+edglets=cell(n,1);
+CP=cell(n,2); % X Y
+X=cell(n,1);
+Y=cell(n,1);
+for  i=1:n
+    edglets{i}=(nedges==i);
+    [Y{i}, X{i}]=find(nedges==i);
+    [CP{i,1}, CP{i,2}] = findInitialControlPoints( X{i},Y{i},edges,maxCPspace );
+end
+
+%% avarage Luminance depends of segemtation area { L(n+1) is the background }
+avgL=zeros(n+1,1);
+for i=1:n+1
+    t=L(seg==i-1);
+    avgL(i)=sum(t)/numel(t);
+end 
+
+%% find the normals at each CP points Theta for the larger Luminance Lavg 
+Orientations = skeletonOrientation(edges,99); 
+Onormal = Orientations+90; 
+CP_normal=cell(n,1);
+hold on
+for  i=1:n
+    for j=1:size(CP{i,2},2)
+        tetha=Onormal(CP{i,2}(j),CP{i,1}(j));
+        delta_y_plus=CP{i,2}(j)+ceil(10*sind(-tetha));
+        delta_x_plus=CP{i,1}(j)+ceil(10*cosd(-tetha));
+        delta_y_minus=CP{i,2}(j)-ceil(10*sind(-tetha));
+        delta_x_minus=CP{i,1}(j)-ceil(10*cosd(-tetha));
+        if(avgL(seg(delta_y_plus,delta_x_plus)+1)<avgL(seg(delta_y_minus,delta_x_minus)+1))
+           CP_normal{i}(j)= tetha+180;
+       else
+            CP_normal{i}(j)=tetha;
+        end
+    end
+end
+
+%% find intersections and extend 
+
+CP_end_pos=cell(n,2);
+CP_end_neg=cell(n,2);
+CP_pos_ext=cell(n,1);
+CP_neg_ext=cell(n,1);
+for  i=1:n 
+    for j=1:size(CP{i,2},2) %section (iv) maximal extent:
+        CP_end_pos{i,1}(j)=CP{i,1}(j)+ceil(maxextention*cosd(-CP_normal{i}(j)));
+        CP_end_pos{i,2}(j)=CP{i,2}(j)+ceil(maxextention*sind(-CP_normal{i}(j)));
+        CP_end_neg{i,1}(j)=CP{i,1}(j)-ceil(maxextention*cosd(-CP_normal{i}(j)));
+        CP_end_neg{i,2}(j)=CP{i,2}(j)-ceil(maxextention*sind(-CP_normal{i}(j)));
+    end
+    for j=1:size(CP{i,2},2) %section (i) hits the image border.
+        if(CP_end_pos{i,1}(j)>size(L,2))
+            CP_end_pos{i,1}(j)=size(L,2);
+        end
+        if(CP_end_pos{i,2}(j)>size(L,1))
+            CP_end_pos{i,2}(j)=size(L,1);
+        end
+        if(CP_end_pos{i,1}(j)<1)
+            CP_end_pos{i,1}(j)=1;
+        end
+        if(CP_end_pos{i,2}(j)<1)
+            CP_end_pos{i,2}(j)=1;
+        end
+        if(CP_end_neg{i,1}(j)>size(L,2))
+            CP_end_neg{i,1}(j)=size(L,2);
+        end
+        if(CP_end_neg{i,2}(j)>size(L,1))
+            CP_end_neg{i,2}(j)=size(L,1);
+        end
+        if(CP_end_neg{i,1}(j)<1)
+            CP_end_neg{i,1}(j)=1;
+        end
+        if(CP_end_neg{i,2}(j)<1)
+            CP_end_neg{i,2}(j)=1;
+        end
+    end
+    for j=1: size(CP{i,2},2) % section (v) ri hits the same enhancement B-spline edge Qi lies on.
+        for s=1:size(CP{i,2},2)
+            if s~=j
+                pos=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_pos{i,1}(s),CP_end_pos{i,2}(s)]);
+                neg=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
+                negpos=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
+                if pos~=inf
+                    CP1dist=(pos(1)-CP{i,1}(j))^2+(pos(2)-CP{i,2}(j))^2;
+                    CP2dist=(pos(1)-CP{i,1}(s))^2+(pos(2)-CP{i,2}(s))^2;
+                    if ( CP1dist>CP2dist)
+                        CP_end_pos{i,1}(j)=pos(1);
+                        CP_end_pos{i,2}(j)=pos(2);
+                    else 
+                        CP_end_pos{i,1}(s)=pos(1);
+                        CP_end_pos{i,2}(s)=pos(2);
+                    end  
+                end
+                if neg~=inf
+                    CP1dist=(neg(1)-CP{i,1}(j))^2+(neg(2)-CP{i,2}(j))^2;
+                    CP2dist=(neg(1)-CP{i,1}(s))^2+(neg(2)-CP{i,2}(s))^2;
+                    if ( CP1dist>CP2dist)
+                        CP_end_neg{i,1}(j)=neg(1);
+                        CP_end_neg{i,2}(j)=neg(2);
+                    else 
+                        CP_end_neg{i,1}(s)=neg(1);
+                        CP_end_neg{i,2}(s)=neg(2);
+                    end
+                end
+                if negpos~=inf
+                        CP1dist=(negpos(1)-CP{i,1}(j))^2+(negpos(2)-CP{i,2}(j))^2;
+                        CP2dist=(negpos(1)-CP{i,1}(s))^2+(negpos(2)-CP{i,1}(s))^2;
+                        if ( CP1dist>CP2dist)
+                            CP_end_pos{i,1}(j)=negpos(1);
+                            CP_end_pos{i,2}(j)=negpos(2);
+                        else 
+                            CP_end_neg{i,1}(s)=negpos(1);
+                            CP_end_neg{i,2}(s)=negpos(2);
+                        end
+                end     
+            end
+        end
+    end
+    for j=1: size(CP{i,2},2)
+        for s=1:size(CP{i,2},2)
+            pos=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_pos{i,1}(s),CP_end_pos{i,2}(s)]);
+            neg=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
+            if pos~=inf
+                CP_end_pos{i,1}(j)=pos(1);
+                CP_end_pos{i,2}(j)=pos(2);
+                CP_end_pos{i,1}(s)=pos(1);
+                CP_end_pos{i,2}(s)=pos(2);    
+            end
+            if neg~=inf
+                 CP_end_neg{i,1}(j)=neg(1);
+                 CP_end_neg{i,2}(j)=neg(2);
+                 CP_end_neg{i,1}(s)=neg(1);
+                 CP_end_neg{i,2}(s)=neg(2);
+            end
+        end
+    end       
+end 
+for i=1:n
+    for j=1:n
+        if i~=j
+            for ii=1: size(CP{i,2},2)
+                for jj=1: size(CP{j,2},2)
+                    pos=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_pos{i,1}(ii),CP_end_pos{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_pos{j,1}(jj),CP_end_pos{j,2}(jj)]);
+                    neg=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_neg{i,1}(ii),CP_end_neg{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_neg{j,1}(jj),CP_end_neg{j,2}(jj)]);
+                    negpos=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_neg{i,1}(ii),CP_end_neg{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_pos{j,1}(jj),CP_end_pos{j,2}(jj)]);
+                   %posneg=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_pos{i,1}(ii),CP_end_pos{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_neg{j,1}(jj),CP_end_neg{j,2}(jj)]);
+                    if pos~=inf
+                        CP1dist=(pos(1)-CP{i,1}(ii))^2+(pos(2)-CP{j,2}(jj))^2;
+                        CP2dist=(pos(1)-CP{i,1}(ii))^2+(pos(2)-CP{j,2}(jj))^2;
+                        if ( CP1dist>CP2dist)
+                            CP_end_pos{i,1}(ii)=pos(1);
+                            CP_end_pos{i,2}(ii)=pos(2);
+                        else 
+                            CP_end_pos{j,1}(jj)=pos(1);
+                            CP_end_pos{j,2}(jj)=pos(2);
+                        end
+                        %{
+                        CP_end_pos{i,1}(ii)=pos(1);
+                        CP_end_pos{i,2}(ii)=pos(2);
+                        CP_end_pos{j,1}(jj)=pos(1);
+                        CP_end_pos{j,2}(jj)=pos(2);
+                        %}
+                    end
+                    if neg~=inf
+                        CP1dist=(neg(1)-CP{i,1}(ii))^2+(neg(2)-CP{i,2}(ii))^2;
+                        CP2dist=(neg(1)-CP{j,1}(jj))^2+(neg(2)-CP{j,2}(jj))^2;
+                        if ( CP1dist>CP2dist)
+                            CP_end_neg{i,1}(ii)=neg(1);
+                            CP_end_neg{i,2}(ii)=neg(2);
+                        else 
+                            CP_end_neg{j,1}(jj)=neg(1);
+                            CP_end_neg{j,2}(jj)=neg(2);
+                        end
+                       %{
+                        CP_end_neg{i,1}(ii)=neg(1);
+                        CP_end_neg{i,2}(ii)=neg(2);
+                        CP_end_neg{j,1}(jj)=neg(1);
+                        CP_end_neg{j,2}(jj)=neg(2);
+                        %}
+                    end
+                    if negpos~=inf
+                        CP1dist=(negpos(1)-CP{i,1}(ii))^2+(negpos(2)-CP{i,2}(ii))^2;
+                        CP2dist=(negpos(1)-CP{j,1}(jj))^2+(negpos(2)-CP{j,2}(jj))^2;
+                        if ( CP1dist>CP2dist)
+                            CP_end_neg{i,1}(ii)=negpos(1);
+                            CP_end_neg{i,2}(ii)=negpos(2);
+                        else 
+                            CP_end_pos{j,1}(jj)=negpos(1);
+                            CP_end_pos{j,2}(jj)=negpos(2);
+                        end
+                        %{
+                        CP_end_neg{i,1}(ii)=negpos(1);
+                        CP_end_neg{i,2}(ii)=negpos(2);
+                        CP_end_pos{j,1}(jj)=negpos(1);
+                        CP_end_pos{j,2}(jj)=negpos(2);
+                        %}
+                    end
+                    
+                end
+            end
+        end
+    end
+end%(ii) ri hits the current medial axis Ai
+for i=1:n
+    for j=1:n
+        if i~=j
+            for ii=1: size(CP{i,2},2)
+                for jj=1: size(CP{j,2},2)
+                    pos=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_pos{i,1}(ii),CP_end_pos{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_pos{j,1}(jj),CP_end_pos{j,2}(jj)]);
+                    neg=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_neg{i,1}(ii),CP_end_neg{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_neg{j,1}(jj),CP_end_neg{j,2}(jj)]);
+                    negpos=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_neg{i,1}(ii),CP_end_neg{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_pos{j,1}(jj),CP_end_pos{j,2}(jj)]);
+                    if pos~=inf
+                        CP_end_pos{i,1}(ii)=pos(1);
+                        CP_end_pos{i,2}(ii)=pos(2);
+                        CP_end_pos{j,1}(jj)=pos(1);
+                        CP_end_pos{j,2}(jj)=pos(2);
+                    end
+                    if neg~=inf  
+                        CP_end_neg{i,1}(ii)=neg(1);
+                        CP_end_neg{i,2}(ii)=neg(2);
+                        CP_end_neg{j,1}(jj)=neg(1);
+                        CP_end_neg{j,2}(jj)=neg(2);
+                    end
+                end
+            end 
+        end
+    end 
+end
+
+%% Reduce extent distance var
+%update distance CP_pos_ext is the distance for the positive normal
+%CP_neg_ext for the negative normal
+
+%[CP_end_pos,CP_end_neg]=variancereduce(CP_pos_ext,CP_neg_ext,CP,CP_end_pos,CP_end_neg,CP_normal,n);
+%[CP_end_pos,CP_end_neg] = difffromavg(CP_pos_ext,CP_neg_ext,CP,CP_end_pos,CP_end_neg,CP_normal,n);
+
+%% find Z starting Apmlitude 
+CP_Z_pos=cell(n,1);
+CP_Z_neg=cell(n,1);
+close2edge=min([size(im,1)-max(CP{i,2}(:)),size(im,2)-max(CP{i,1}(:)),min(CP{i,2}(:)),min(CP{i,1}(:))]);
+Area=min([close2edge-1,20]); 
+for i=1:n
+    for j=1:size(CP{i,2},2)
+        Tn=mean(mean(T(CP{i,2}(j)-2:CP{i,2}(j)+2,CP{i,1}(j)-2:CP{i,1}(j)+2)));
+        CP_Z_pos{i,1}(j)=(lambda)*Tn;  
+        xpos=CP{i,1}(j)+ceil(cosd(-CP_normal{i}(j)));
+        ypos=CP{i,2}(j)+ceil(sind(-CP_normal{i}(j)));
+        max_neb_L=L(ypos,xpos);  
+        %max_neb_L=max(max(L(CP{i,2}(j)-Area:CP{i,2}(j)+Area,CP{i,1}(j)-Area:CP{i,1}(j)+Area)));
+        if (10^CP_Z_pos{i,1}(j)>percent*10^max_neb_L)
+            CP_Z_pos{i,1}(j)=log10(percent*10^max_neb_L);
+        end
+        CP_Z_neg{i,1}(j)=lambda*Tn;
+        xneg=CP{i,1}(j)-ceil(2*cosd(-CP_normal{i}(j)));
+        yneg=CP{i,2}(j)-ceil(2*sind(-CP_normal{i}(j)));
+        min_neb_L=L(yneg,xneg);
+        %min_neb_L=min(min(L(CP{i,2}(j)-Area:CP{i,2}(j)+Area,CP{i,1}(j)-Area:CP{i,1}(j)+Area)));
+        if(10^CP_Z_neg{i,1}(j)>percent*10^min_neb_L)
+            CP_Z_neg{i,1}(j)=log10(percent*10^min_neb_L);
+        end
+    end
+end
+
+%% Cornsweet effect lines depends on Segma
+CP_line_pos=cell(n,2);
+CP_line_neg=cell(n,2);
+for i=1:n %find the cordinates of the point that will get effected 
+    for j=1:size(CP{i,2},2)
+        CP1dist=sqrt((CP{i,1}(j)-CP_end_pos{i,1}(j))^2+(CP{i,2}(j)-CP_end_pos{i,2}(j))^2);
+        [CP_line_pos{i,1}{j},CP_line_pos{i,2}{j}]=fillline([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],floor(CP1dist));
+        CP_line_pos{i,1}{j}=round(CP_line_pos{i,1}{j});
+        CP_line_pos{i,2}{j}=round(CP_line_pos{i,2}{j});
+        CP1dist=sqrt((CP{i,1}(j)-CP_end_neg{i,1}(j))^2+(CP{i,2}(j)-CP_end_neg{i,2}(j))^2);
+        [CP_line_neg{i,1}{j},CP_line_neg{i,2}{j}]=fillline([CP{i,1}(j),CP{i,2}(j)],[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)],floor(CP1dist));
+        CP_line_neg{i,1}{j}=round(CP_line_neg{i,1}{j});
+        CP_line_neg{i,2}{j}=round(CP_line_neg{i,2}{j});
+    end
+end
+ Zplus_effect=zeros(size(seg,2),size(seg,1));
+ Zneg_effect=zeros(size(seg,2),size(seg,1));
+for i=1:n % fill the values to the effected points 
+    for j=1:size(CP{i,2},2)
+        if(CP_Z_pos{i,1}(j)~=0)
+             D=size(CP_line_pos{i,1}{j},2);
+             Dneg=size(CP_line_neg{i,1}{j},2);
+             if(D>1)
+                x_ind{i,j}=0:D-1;
+                y_ind{i,j}=exp(-2*sigma*(x_ind{i,j})/D);
+                yy_ind{i,j}=(10^CP_Z_pos{i,1}(j))*(imadjust(y_ind{i,j},[min(y_ind{i,j}),max(y_ind{i,j})],[0 max(y_ind{i,j})]));
+                for s=1:D
+                  Zplus_effect(CP_line_pos{i,1}{j}(s),CP_line_pos{i,2}{j}(s))=+yy_ind{i,j}(s);
+                end
+             end
+             if(Dneg>1)
+                x_ind_neg{i,j}=0:Dneg-1;
+                y_ind_neg{i,j}=exp(-2*sigma*(x_ind_neg{i,j})/Dneg);
+                yy_ind_neg{i,j}=(10^CP_Z_neg{i,1}(j))*(imadjust(y_ind_neg{i,j},[min(y_ind_neg{i,j}),max(y_ind_neg{i,j})],[0 max(y_ind_neg{i,j})]));
+                for s=1:Dneg
+                  Zneg_effect(CP_line_neg{i,1}{j}(s),CP_line_neg{i,2}{j}(s))=-yy_ind_neg{i,j}(s);
+                end
+             end
+        end
+    end 
+end
+        
+%% blur and conv
+%H=3*fspecial('gaussian',3,1);
+H=1/25*ones(5,5);
+BLplus = imfilter(Zplus_effect,H);
+BLneg=imfilter(Zneg_effect,H);
+%mask = imdilate(edges,ones(maxextention));
+%blur_Zplus(mask==1) = BLplus(mask==1);
+%blur_Zneg(mask==1)=BLneg(mask==1);
+blur_Z=BLplus+BLneg;
+%blur_Z=Zplus_effect+Zneg_effect;
+blur_Z=imresize(blur_Z,[size(L,2),size(L,1)]);
+Lnew=10.^L+blur_Z';
+
+
+%BL = imfilter(Lnew,H);
+%mask = imdilate(edges,ones(maxextention));
+%Lnew(mask==1) = BL(mask==1);
+LABim(:,:,1)=Lnew;
+L10=10.^(L)-1;
+
+if colour % add colour to bright halos
+    alpha = Lnew./L10;
+    alpha = 2-alpha;
+    alpha(alpha>1) = 1; % bright halos only; change this for other colourings
+    x = ones(size(L10))*YxyTC(2);
+    y = ones(size(L10))*YxyTC(3);
+    LABim(:,:,2) = x.*(1-alpha)+alpha.*LABim(:,:,2);
+    LABim(:,:,3) = y.*(1-alpha)+alpha.*LABim(:,:,3);
+end
+newim=lab2rgb(LABim);
+Resim=uint8(255*(newim./255).^(1/2.2));
+
+
+
+%% plotting
+%ploting the extend 
+
+figure; plot(x_ind{i,j},y_ind{i,j})
+hold on;
+plot(-x_ind{i,j},-y_ind{i,j})
+
+figure;
+hold on;
+for i=1:n
+     for ii=1: size(CP{i,2},2)
+         plot([CP_end_neg{i,1}(ii),CP{i,1}(ii)],[CP_end_neg{i,2}(ii),CP{i,2}(ii)],'r')
+         plot([CP_end_pos{i,1}(ii),CP{i,1}(ii)],[CP_end_pos{i,2}(ii),CP{i,2}(ii)],'b')
+         plot(CP_line_pos{i,1}{ii},CP_line_pos{i,2}{ii},'.m')
+         plot(CP_line_neg{i,1}{ii},CP_line_neg{i,2}{ii},'.y')
+     end 
+end
+ 
+% plot the normals 
+figure;imshow(edges,[]);
+%Overlay normal
+hold on;
+for i=1:n
+    scatter(CP{i,1},CP{i,2},'*b')
+    quiver(CP{i,1},CP{i,2},-cosd(CP_normal{i,1}+180),sind(CP_normal{i,1}+180),'r')
+    quiver(CP{i,1},CP{i,2},-cosd(CP_normal{i,1}),sind(CP_normal{i,1}),'y')
+end
+hold off;
+%plot the Effect that was added to the luminance
+figure;imshow(blur_Z',[])
+
+%plot the results
+figure;imshow(Resim,[]),title('after')
+figure;imshow(orgim,[]),title('before')
+
+%plot the luminance effect at line between for [x1,x2]
+figure;plot(Lnew(350,:,1))
+figure;plot(LABimorg(350,:,1))
+
