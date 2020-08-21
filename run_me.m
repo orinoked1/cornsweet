@@ -1,115 +1,67 @@
+close all
+clear all
+
 orgim=imread('1.tif');
-im=orgim;
+[img_hight,img_width ] =size(orgim,1:2);
 %imageSegmenter(im);
 load('BW1')
-im=255*((double(im)./255).^2.2);
-
+im = double(orgim);
 
 %% initial param 
-maxextention=50;
+max_enhencment_length=50; %50
 lambda=1.2; %log scale  1.2
-sigma=1;%cornsweet 1
-maxCPspace=3;
+sigma=3;%cornsweet 1
+maxCPspace=0; % was 3
 percent=0.13; %the percent of the maximum cornsweent effect depends on the max luminance around the CP 0.13
-colour=0; % 1 if it is colured image gray scale 0
+orination_block_size = 21; % 99
 
 %% initail calculations
-LABimorg=rgb2lab(im);
-LABim=LABimorg;
-l=LABim(:,:,1);
-L=log10(l+1);
-T=TexturenessBae(l/max(l(:))); % the values is between 0 and 1 
-T=1+(T/5);
-targetC = [0 105 180]; % RGB
-YxyTC=rgb2lab(targetC);
+LAB_orig=rgb2lab(im);
+LAB_new=LAB_orig;
+L=log10(LAB_new(:,:,1)+1);
+
 seg=bwlabel(BW1);
 
-%% find edges and Control Points 
+%% find edges from seg map
 edges=edge(BW1,'canny',0.3);
 nedges=bwlabel(edges);
-n=max(nedges(:));
-edglets=cell(n,1);
-CP=cell(n,2); % X Y
-X=cell(n,1);
-Y=cell(n,1);
-for  i=1:n
-    edglets{i}=(nedges==i);
-    [Y{i}, X{i}]=find(nedges==i);
-    [CP{i,1}, CP{i,2}] = findInitialControlPoints( X{i},Y{i},edges,maxCPspace );
+n_edges=max(nedges(:));
+CP=cell(n_edges,2); % X Y
+for  i_edge=1:n_edges
+    [cur_y, cur_x]=find(nedges==i_edge);
+    [CP{i_edge,1}, CP{i_edge,2}] = findInitialControlPoints( cur_x,cur_y,edges,maxCPspace );
 end
 
-%% avarage Luminance depends of segemtation area { L(n+1) is the background }
-avgL=zeros(n+1,1);
-for i=1:n+1
-    t=L(seg==i-1);
-    avgL(i)=sum(t)/numel(t);
-end 
 
-%% find the normals at each CP points Theta for the larger Luminance Lavg 
-Orientations = skeletonOrientation(edges,99); 
-Onormal = Orientations+90; 
-CP_normal=cell(n,1);
-hold on
-for  i=1:n
-    for j=1:size(CP{i,2},2)
-        tetha=Onormal(CP{i,2}(j),CP{i,1}(j));
-        delta_y_plus=CP{i,2}(j)+ceil(10*sind(-tetha));
-        delta_x_plus=CP{i,1}(j)+ceil(10*cosd(-tetha));
-        delta_y_minus=CP{i,2}(j)-ceil(10*sind(-tetha));
-        delta_x_minus=CP{i,1}(j)-ceil(10*cosd(-tetha));
-        if(avgL(seg(delta_y_plus,delta_x_plus)+1)<avgL(seg(delta_y_minus,delta_x_minus)+1))
-           CP_normal{i}(j)= tetha+180;
-       else
-            CP_normal{i}(j)=tetha;
-        end
-    end
-end
 
-%% find intersections and extend 
+%% find the normals control point  diraction is to the area with higher L val
+CP_normal = find_normal_directions(L,CP,seg,edges,orination_block_size,n_edges);
+%% for each CP find the enhencment extent acording to end conditions
+CP_end_pos=cell(n_edges,2);
+CP_end_neg=cell(n_edges,2);
+CP_end_pos2=cell(n_edges,2);
+CP_end_neg2=cell(n_edges,2);
 
-CP_end_pos=cell(n,2);
-CP_end_neg=cell(n,2);
-CP_pos_ext=cell(n,1);
-CP_neg_ext=cell(n,1);
-for  i=1:n 
-    for j=1:size(CP{i,2},2) %section (iv) maximal extent:
-        CP_end_pos{i,1}(j)=CP{i,1}(j)+ceil(maxextention*cosd(-CP_normal{i}(j)));
-        CP_end_pos{i,2}(j)=CP{i,2}(j)+ceil(maxextention*sind(-CP_normal{i}(j)));
-        CP_end_neg{i,1}(j)=CP{i,1}(j)-ceil(maxextention*cosd(-CP_normal{i}(j)));
-        CP_end_neg{i,2}(j)=CP{i,2}(j)-ceil(maxextention*sind(-CP_normal{i}(j)));
-    end
-    for j=1:size(CP{i,2},2) %section (i) hits the image border.
-        if(CP_end_pos{i,1}(j)>size(L,2))
-            CP_end_pos{i,1}(j)=size(L,2);
-        end
-        if(CP_end_pos{i,2}(j)>size(L,1))
-            CP_end_pos{i,2}(j)=size(L,1);
-        end
-        if(CP_end_pos{i,1}(j)<1)
-            CP_end_pos{i,1}(j)=1;
-        end
-        if(CP_end_pos{i,2}(j)<1)
-            CP_end_pos{i,2}(j)=1;
-        end
-        if(CP_end_neg{i,1}(j)>size(L,2))
-            CP_end_neg{i,1}(j)=size(L,2);
-        end
-        if(CP_end_neg{i,2}(j)>size(L,1))
-            CP_end_neg{i,2}(j)=size(L,1);
-        end
-        if(CP_end_neg{i,1}(j)<1)
-            CP_end_neg{i,1}(j)=1;
-        end
-        if(CP_end_neg{i,2}(j)<1)
-            CP_end_neg{i,2}(j)=1;
-        end
-    end
-    for j=1: size(CP{i,2},2) % section (v) ri hits the same enhancement B-spline edge Qi lies on.
+for  i=1:n_edges 
+    %% condition (iv) max_enhencment_length
+    CP_end_pos{i,1} = CP{i,1}+ceil(max_enhencment_length*cosd(-CP_normal{i}));
+    CP_end_pos{i,2} = CP{i,2}+ceil(max_enhencment_length*sind(-CP_normal{i}));
+    CP_end_neg{i,1} = CP{i,1}-ceil(max_enhencment_length*cosd(-CP_normal{i}));
+    CP_end_neg{i,2} = CP{i,1}-ceil(max_enhencment_length*sind(-CP_normal{i}));
+    %% condition (i) image_border
+    CP_end_pos{i,1}(CP_end_pos{i,1}>img_width) =img_width;
+    CP_end_pos{i,2}(CP_end_pos{i,2}>img_hight) =img_hight;
+    CP_end_pos{i,2}(CP_end_pos{i,2}<1) = 1;
+    CP_end_neg{i,1}(CP_end_neg{i,1}>img_width) =img_width;
+    CP_end_neg{i,2}(CP_end_neg{i,2}>img_hight) =img_hight;
+    CP_end_neg{i,2}(CP_end_neg{i,2}<1) = 1;
+   % section (v) ri hits the same enhancement B-spline edge Qi lies on.
+    for j=1: size(CP{i,2},2) 
         for s=1:size(CP{i,2},2)
             if s~=j
-                pos=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_pos{i,1}(s),CP_end_pos{i,2}(s)]);
-                neg=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
-                negpos=linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
+                pos=    linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_pos{i,1}(s),CP_end_pos{i,2}(s)]);
+                neg=    linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
+                negpos= linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
                 if pos~=inf
                     CP1dist=(pos(1)-CP{i,1}(j))^2+(pos(2)-CP{i,2}(j))^2;
                     CP2dist=(pos(1)-CP{i,1}(s))^2+(pos(2)-CP{i,2}(s))^2;
@@ -165,8 +117,8 @@ for  i=1:n
         end
     end       
 end 
-for i=1:n
-    for j=1:n
+for i=1:n_edges
+    for j=1:n_edges
         if i~=j
             for ii=1: size(CP{i,2},2)
                 for jj=1: size(CP{j,2},2)
@@ -231,14 +183,13 @@ for i=1:n
         end
     end
 end%(ii) ri hits the current medial axis Ai
-for i=1:n
-    for j=1:n
+for i=1:n_edges
+    for j=1:n_edges
         if i~=j
             for ii=1: size(CP{i,2},2)
                 for jj=1: size(CP{j,2},2)
                     pos=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_pos{i,1}(ii),CP_end_pos{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_pos{j,1}(jj),CP_end_pos{j,2}(jj)]);
                     neg=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_neg{i,1}(ii),CP_end_neg{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_neg{j,1}(jj),CP_end_neg{j,2}(jj)]);
-                    negpos=linelineinters([CP{i,1}(ii),CP{i,2}(ii)],[CP_end_neg{i,1}(ii),CP_end_neg{i,2}(ii)],[CP{j,1}(jj),CP{j,2}(jj)],[CP_end_pos{j,1}(jj),CP_end_pos{j,2}(jj)]);
                     if pos~=inf
                         CP_end_pos{i,1}(ii)=pos(1);
                         CP_end_pos{i,2}(ii)=pos(2);
@@ -265,11 +216,12 @@ end
 %[CP_end_pos,CP_end_neg] = difffromavg(CP_pos_ext,CP_neg_ext,CP,CP_end_pos,CP_end_neg,CP_normal,n);
 
 %% find Z starting Apmlitude 
-CP_Z_pos=cell(n,1);
-CP_Z_neg=cell(n,1);
-close2edge=min([size(im,1)-max(CP{i,2}(:)),size(im,2)-max(CP{i,1}(:)),min(CP{i,2}(:)),min(CP{i,1}(:))]);
-Area=min([close2edge-1,20]); 
-for i=1:n
+T=TexturenessBae(LAB_new(:,:,1)/max(max(LAB_new(:,:,1)))); % the values is between 0 and 1 
+T=1+(T/5);
+
+CP_Z_pos=cell(n_edges,1);
+CP_Z_neg=cell(n_edges,1);
+for i=1:n_edges
     for j=1:size(CP{i,2},2)
         Tn=mean(mean(T(CP{i,2}(j)-2:CP{i,2}(j)+2,CP{i,1}(j)-2:CP{i,1}(j)+2)));
         CP_Z_pos{i,1}(j)=(lambda)*Tn;  
@@ -292,9 +244,9 @@ for i=1:n
 end
 
 %% Cornsweet effect lines depends on Segma
-CP_line_pos=cell(n,2);
-CP_line_neg=cell(n,2);
-for i=1:n %find the cordinates of the point that will get effected 
+CP_line_pos=cell(n_edges,2);
+CP_line_neg=cell(n_edges,2);
+for i=1:n_edges %find the cordinates of the point that will get effected 
     for j=1:size(CP{i,2},2)
         CP1dist=sqrt((CP{i,1}(j)-CP_end_pos{i,1}(j))^2+(CP{i,2}(j)-CP_end_pos{i,2}(j))^2);
         [CP_line_pos{i,1}{j},CP_line_pos{i,2}{j}]=fillline([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],floor(CP1dist));
@@ -308,7 +260,7 @@ for i=1:n %find the cordinates of the point that will get effected
 end
  Zplus_effect=zeros(size(seg,2),size(seg,1));
  Zneg_effect=zeros(size(seg,2),size(seg,1));
-for i=1:n % fill the values to the effected points 
+for i=1:n_edges % fill the values to the effected points 
     for j=1:size(CP{i,2},2)
         if(CP_Z_pos{i,1}(j)~=0)
              D=size(CP_line_pos{i,1}{j},2);
@@ -350,22 +302,12 @@ Lnew=10.^L+blur_Z';
 %BL = imfilter(Lnew,H);
 %mask = imdilate(edges,ones(maxextention));
 %Lnew(mask==1) = BL(mask==1);
-LABim(:,:,1)=Lnew;
-L10=10.^(L)-1;
-
-if colour % add colour to bright halos
-    alpha = Lnew./L10;
-    alpha = 2-alpha;
-    alpha(alpha>1) = 1; % bright halos only; change this for other colourings
-    x = ones(size(L10))*YxyTC(2);
-    y = ones(size(L10))*YxyTC(3);
-    LABim(:,:,2) = x.*(1-alpha)+alpha.*LABim(:,:,2);
-    LABim(:,:,3) = y.*(1-alpha)+alpha.*LABim(:,:,3);
-end
-newim=lab2rgb(LABim);
-Resim=uint8(255*(newim./255).^(1/2.2));
+LAB_new(:,:,1)=Lnew;
 
 
+newim=lab2rgb(LAB_new);
+% Resim=uint8(255*(newim./255).^(1/2.2));
+Resim = uint8(newim);
 
 %% plotting
 %ploting the extend 
@@ -376,7 +318,7 @@ plot(-x_ind{i,j},-y_ind{i,j})
 
 figure;
 hold on;
-for i=1:n
+for i=1:n_edges
      for ii=1: size(CP{i,2},2)
          plot([CP_end_neg{i,1}(ii),CP{i,1}(ii)],[CP_end_neg{i,2}(ii),CP{i,2}(ii)],'r')
          plot([CP_end_pos{i,1}(ii),CP{i,1}(ii)],[CP_end_pos{i,2}(ii),CP{i,2}(ii)],'b')
@@ -389,7 +331,7 @@ end
 figure;imshow(edges,[]);
 %Overlay normal
 hold on;
-for i=1:n
+for i=1:n_edges
     scatter(CP{i,1},CP{i,2},'*b')
     quiver(CP{i,1},CP{i,2},-cosd(CP_normal{i,1}+180),sind(CP_normal{i,1}+180),'r')
     quiver(CP{i,1},CP{i,2},-cosd(CP_normal{i,1}),sind(CP_normal{i,1}),'y')
@@ -403,6 +345,5 @@ figure;imshow(Resim,[]),title('after')
 figure;imshow(orgim,[]),title('before')
 
 %plot the luminance effect at line between for [x1,x2]
-figure;plot(Lnew(350,:,1))
-figure;plot(LABimorg(350,:,1))
+figure;plot(Lnew(350,:,1)), hold on;plot(LAB_orig(350,:,1)),legend('after','before')
 
