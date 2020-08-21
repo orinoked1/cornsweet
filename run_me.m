@@ -47,7 +47,7 @@ for  i=1:n_edges
     CP_end_pos{i,1} = CP{i,1}+ceil(max_enhencment_length*cosd(-CP_normal{i}));
     CP_end_pos{i,2} = CP{i,2}+ceil(max_enhencment_length*sind(-CP_normal{i}));
     CP_end_neg{i,1} = CP{i,1}-ceil(max_enhencment_length*cosd(-CP_normal{i}));
-    CP_end_neg{i,2} = CP{i,1}-ceil(max_enhencment_length*sind(-CP_normal{i}));
+    CP_end_neg{i,2} = CP{i,2}-ceil(max_enhencment_length*sind(-CP_normal{i}));
     %% condition (i) image_border
     CP_end_pos{i,1}(CP_end_pos{i,1}>img_width) =img_width;
     CP_end_pos{i,2}(CP_end_pos{i,2}>img_hight) =img_hight;
