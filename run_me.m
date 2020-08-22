@@ -90,7 +90,9 @@ end
 %[CP_end_pos,CP_end_neg] = difffromavg(CP_pos_ext,CP_neg_ext,CP,CP_end_pos,CP_end_neg,CP_normal,n);
 
 %% find Z starting Apmlitude 
-T = LAB_new(:,:,1);
+T=TexturenessBae(LAB_new(:,:,1)/max(max(LAB_new(:,:,1)))); % the values is between 0 and 1 
+T=1+(T/5);
+
 CP_Z_pos=cell(n_edges,1);
 CP_Z_neg=cell(n_edges,1);
 for i=1:n_edges
