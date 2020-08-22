@@ -11,7 +11,7 @@ im = double(orgim);
 max_enhencment_length=50; %50
 lambda=1.2; %log scale  1.2
 sigma=3;%cornsweet 1
-maxCPspace=0; % was 3
+maxCPspace=3; % was 3
 percent=0.13; %the percent of the maximum cornsweent effect depends on the max luminance around the CP 0.13
 orination_block_size = 21; % 99
 
@@ -56,45 +56,37 @@ for  i=1:n_edges
     CP_end_neg{i,2}(CP_end_neg{i,2}>img_hight) =img_hight;
     CP_end_neg{i,2}(CP_end_neg{i,2}<1) = 1;
    % section (v) ri hits the same enhancement B-spline edge Qi lies on.
-    for j=1: size(CP{i,2},2) 
-        for s=1:size(CP{i,2},2)
+   dist_CP = squareform(pdist ([CP{i,1};CP{i,2}]'));
+   for j=1: size(CP{i,2},2) 
+        close_CP_idx = dist_CP(j,:)<max_enhencment_length*2;
+        for s=find(close_CP_idx)
             if s~=j
-                pos=    linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_pos{i,1}(s),CP_end_pos{i,2}(s)]);
-                neg=    linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
-                negpos= linelineinters([CP{i,1}(j),CP{i,2}(j)],[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)],[CP{i,1}(s),CP{i,2}(s)],[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]);
-                if pos~=inf
-                    CP1dist=(pos(1)-CP{i,1}(j))^2+(pos(2)-CP{i,2}(j))^2;
-                    CP2dist=(pos(1)-CP{i,1}(s))^2+(pos(2)-CP{i,2}(s))^2;
+                p2p = findintersection([[CP{i,1}(j),CP{i,2}(j)];[CP_end_pos{i,1}(j),CP_end_pos{i,2}(j)]]...
+                    ,[[CP{i,1}(s),CP{i,2}(s)];[CP_end_pos{i,1}(s),CP_end_pos{i,2}(s)]]);
+                n2n = findintersection([[CP{i,1}(j),CP{i,2}(j)];[CP_end_neg{i,1}(j),CP_end_neg{i,2}(j)]]...
+                    ,[[CP{i,1}(s),CP{i,2}(s)];[CP_end_neg{i,1}(s),CP_end_neg{i,2}(s)]]);
+                if p2p~=inf
+                    CP1dist=(p2p(1)-CP{i,1}(j))^2+(p2p(2)-CP{i,2}(j))^2;
+                    CP2dist=(p2p(1)-CP{i,1}(s))^2+(p2p(2)-CP{i,2}(s))^2;
                     if ( CP1dist>CP2dist)
-                        CP_end_pos{i,1}(j)=pos(1);
-                        CP_end_pos{i,2}(j)=pos(2);
+                        CP_end_pos{i,1}(j)=p2p(1);
+                        CP_end_pos{i,2}(j)=p2p(2);
                     else 
-                        CP_end_pos{i,1}(s)=pos(1);
-                        CP_end_pos{i,2}(s)=pos(2);
+                        CP_end_pos{i,1}(s)=p2p(1);
+                        CP_end_pos{i,2}(s)=p2p(2);
                     end  
                 end
-                if neg~=inf
-                    CP1dist=(neg(1)-CP{i,1}(j))^2+(neg(2)-CP{i,2}(j))^2;
-                    CP2dist=(neg(1)-CP{i,1}(s))^2+(neg(2)-CP{i,2}(s))^2;
+                if n2n~=inf
+                    CP1dist=(n2n(1)-CP{i,1}(j))^2+(n2n(2)-CP{i,2}(j))^2;
+                    CP2dist=(n2n(1)-CP{i,1}(s))^2+(n2n(2)-CP{i,2}(s))^2;
                     if ( CP1dist>CP2dist)
-                        CP_end_neg{i,1}(j)=neg(1);
-                        CP_end_neg{i,2}(j)=neg(2);
+                        CP_end_neg{i,1}(j)=n2n(1);
+                        CP_end_neg{i,2}(j)=n2n(2);
                     else 
-                        CP_end_neg{i,1}(s)=neg(1);
-                        CP_end_neg{i,2}(s)=neg(2);
+                        CP_end_neg{i,1}(s)=n2n(1);
+                        CP_end_neg{i,2}(s)=n2n(2);
                     end
-                end
-                if negpos~=inf
-                        CP1dist=(negpos(1)-CP{i,1}(j))^2+(negpos(2)-CP{i,2}(j))^2;
-                        CP2dist=(negpos(1)-CP{i,1}(s))^2+(negpos(2)-CP{i,1}(s))^2;
-                        if ( CP1dist>CP2dist)
-                            CP_end_pos{i,1}(j)=negpos(1);
-                            CP_end_pos{i,2}(j)=negpos(2);
-                        else 
-                            CP_end_neg{i,1}(s)=negpos(1);
-                            CP_end_neg{i,2}(s)=negpos(2);
-                        end
-                end     
+                end    
             end
         end
     end
